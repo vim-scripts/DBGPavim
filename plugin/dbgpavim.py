@@ -44,6 +44,13 @@ import string
 import time
 from threading import Thread,Lock
 
+def getFilePath(s):
+  fn = s[7:]
+  win = 0
+  if fn[2] == ':':
+    fn = fn[1:]
+    win = 1
+  return [fn, win]
 class VimWindow:
   """ wrapper class of window of vim """
   def __init__(self, name = 'DEBUG_WINDOW'):
@@ -217,10 +224,8 @@ class StackWindow(VimWindow):
         fmark = '()'
       else:
         fmark = ''
-      if sys.platform == 'win32':
-        fn = node.getAttribute('filename')[8:]
-      else:
-        fn = node.getAttribute('filename')[7:]
+      [fn, win] = getFilePath(node.getAttribute('filename'))
+      fn = dbgPavim.localPathOf(fn)
       return str('%-2s %-15s %s:%s' % (      \
           node.getAttribute('level'),        \
           node.getAttribute('where')+fmark,  \
@@ -307,7 +312,7 @@ class WatchWindow(VimWindow):
       return str(node.data)
   def on_create(self):
     self.write('<?')
-    self.command('inoremap <buffer> <cr> <esc>:python debugger.debugSession.watch_execute()<cr>')
+    self.command('inoremap <buffer> <cr> <esc>:python dbgPavim.debugSession.watch_execute()<cr>')
     self.command('set noai nocin')
     self.command('set nowrap fdm=manual fmr={{{,}}} ft=php fdl=1')
   def input(self, mode, arg = ''):
@@ -348,7 +353,7 @@ class HelpWindow(VimWindow):
         '  <F5>   run                         | :Pg property get             \n' + \
         '  <F6>   quit debugging              | <F9>   toggle layout         \n' + \
         '  <F7>   eval                        | <F11>  get all context       \n' + \
-        '  <F8>   toggle debuggerBreakAtEntry | <F12>  get property at cursor\n' + \
+        '  <F8>   toggle dbgPavimBreakAtEntry | <F12>  get property at cursor\n' + \
         '                                                                    \n' + \
         '  For more instructions and latest version,                         \n' + \
         '               pleae refer to https://github.com/brookhong/DBGPavim \n' + \
@@ -371,10 +376,7 @@ class DebugUI:
     self.line     = None
     self.winbuf   = {}
     self.cursign  = None
-    if sys.platform == 'win32':
-      self.sessfile = "./debugger_vim_saved_session." + str(os.getpid())
-    else:
-      self.sessfile = "/tmp/debugger_vim_saved_session." + str(os.getpid())
+    self.sessfile = os.getenv("HOME").replace("\\","/")+"/dbgpavim_saved_session." + str(os.getpid())
 
   def trace(self):
     if self.tracewin:
@@ -500,6 +502,7 @@ class DbgSession:
     self.latestRes = None
     self.msgid = 0
     self.sock = sock
+    self.isWinServer = 0
     self.bptsetlst  = {}
     self.bptsetids  = {}
   def jump(self, fn, line):
@@ -559,6 +562,8 @@ class DbgSession:
         self.handle_response_breakpoint_set(resDom)
       if resDom.firstChild.getAttribute('command') == "stop":
         self.close()
+    elif resDom.firstChild.tagName == "init":
+      [fn, self.isWinServer] = getFilePath(resDom.firstChild.getAttribute('fileuri'))
     return resDom
   def send_command(self, cmd, arg1 = '', arg2 = ''):
     self.msgid = self.msgid + 1
@@ -591,10 +596,13 @@ class DbgSession:
       return
     self.ack_command(1)
     flag = 0
-    for bno in debugger.breakpt.list():
+    for bno in dbgPavim.breakpt.list():
+      fn = dbgPavim.remotePathOf(dbgPavim.breakpt.getfile(bno))
+      if self.isWinServer:
+        fn = fn.replace("/","\\")
       msgid = self.send_command('breakpoint_set', \
-                                '-t line -f ' + debugger.breakpt.getfile(bno) + ' -n ' + str(debugger.breakpt.getline(bno)) + ' -s enabled', \
-                                debugger.breakpt.getexp(bno))
+                                '-t line -f ' + fn + ' -n ' + str(dbgPavim.breakpt.getline(bno)) + ' -s enabled', \
+                                dbgPavim.breakpt.getexp(bno))
       self.bptsetlst[msgid] = bno
       flag = 1
     if flag:
@@ -603,7 +611,7 @@ class DbgSession:
 class DbgSessionWithUI(DbgSession):
   def __init__(self, sock):
     self.status     = None
-    self.ui         = debugger.ui
+    self.ui         = dbgPavim.ui
 
     self.msgid      = 0
     self.stacks     = []
@@ -613,16 +621,17 @@ class DbgSessionWithUI(DbgSession):
   def copyFromParent(self, ss):
     self.latestRes = ss.latestRes
     self.msgid = ss.msgid
+    self.isWinServer = ss.isWinServer
     self.sock = ss.sock
     self.bptsetlst  = ss.bptsetlst
     self.bptsetids  = ss.bptsetids
   def init(self):
-    self.command('feature_set', '-n max_children -v ' + debugger.max_children)
-    self.command('feature_set', '-n max_data -v ' + debugger.max_data)
-    self.command('feature_set', '-n max_depth -v ' + debugger.max_depth)
+    self.command('feature_set', '-n max_children -v ' + dbgPavim.max_children)
+    self.command('feature_set', '-n max_data -v ' + dbgPavim.max_data)
+    self.command('feature_set', '-n max_depth -v ' + dbgPavim.max_depth)
   def start(self):
     self.sock.settimeout(30)
-    debugger.updateStatusLine()
+    dbgPavim.updateStatusLine()
     self.ui.debug_mode()
 
     if self.latestRes != None:
@@ -653,7 +662,7 @@ class DbgSessionWithUI(DbgSession):
       handler = getattr(self, 'handle_' + fc.tagName)
       handler(res)
     except AttributeError:
-      print 'Debugger.handle_'+fc.tagName+'() not found, please see the LOG___WINDOW'
+      print 'DBGPavim.handle_'+fc.tagName+'() not found, please see the LOG___WINDOW'
     self.ui.go_srcview()
     return res
   def handle_response(self, res):
@@ -670,12 +679,12 @@ class DbgSessionWithUI(DbgSession):
     try:
       handler = getattr(self, 'handle_response_' + command)
     except AttributeError:
-      print 'Debugger.handle_response_'+command+'() not found, please see the LOG___WINDOW'
+      print 'DBGPavim.handle_response_'+command+'() not found, please see the LOG___WINDOW'
       return
     handler(res)
     return
   def handle_response_stop(self, res):
-    debugger.handle_exception()
+    dbgPavim.handle_exception()
 
   def handle_init(self, res):
     """handle <init> tag
@@ -694,11 +703,9 @@ class DbgSessionWithUI(DbgSession):
       </copyright>
     </init>"""
 
-    if sys.platform == 'win32':
-      file = res.firstChild.getAttribute('fileuri')[8:]
-    else:
-      file = res.firstChild.getAttribute('fileuri')[7:]
-    self.ui.set_srcview(file, 1)
+    [fn, self.isWinServer] = getFilePath(res.firstChild.getAttribute('fileuri'))
+    fn = dbgPavim.localPathOf(fn)
+    self.ui.set_srcview(fn, 1)
 
   def handle_response_error(self, res):
     """ handle <error> tag """
@@ -715,7 +722,14 @@ class DbgSessionWithUI(DbgSession):
     """handle <response command=stack_get> tag
     <response command="stack_get" transaction_id="1 ">
       <stack filename="file:///home/segv/htdocs/index.php" level="0" lineno="41" where="{main}"/>
-    </response>"""
+    </response>
+
+    for windows
+    <response xmlns="urn:debugger_protocol_v1" xmlns:xdebug="http://xdebug.org/dbgp/xdebug" command="stack_get" transaction_id="12">
+      <stack where="{main}" level="0" type="file" filename="file:///D:/works/scriptbundle/php/playpen.php" lineno="16">
+      </stack>
+    </response>
+    """
 
     stacks = res.getElementsByTagName('stack')
     if len(stacks)>0:
@@ -724,10 +738,8 @@ class DbgSessionWithUI(DbgSession):
 
       self.stacks    = []
       for s in stacks:
-        if sys.platform == 'win32':
-          fn = s.getAttribute('filename')[8:]
-        else:
-          fn = s.getAttribute('filename')[7:]
+        [fn, win] = getFilePath(s.getAttribute('filename'))
+        fn = dbgPavim.localPathOf(fn)
         self.stacks.append( {'file':  fn, \
                              'line':  int(s.getAttribute('lineno')),  \
                              'where': s.getAttribute('where'),        \
@@ -853,7 +865,7 @@ class DbgSilentClient(Thread):
     if status == "stopping":
       self.session.command("stop")
     elif status == "break":
-      debugger.debugListener.newSession(self.session)
+      dbgPavim.debugListener.newSession(self.session)
 
 class DbgListener(Thread):
   (INIT,LISTEN,CLOSED) = (0,1,2)
@@ -867,7 +879,7 @@ class DbgListener(Thread):
   def start(self):
     Thread.start(self)
     time.sleep(0.1)
-    debugger.updateStatusLine()
+    dbgPavim.updateStatusLine()
   def pendingCount(self):
     self.lock.acquire()
     c = len(self.session_queue)
@@ -882,7 +894,7 @@ class DbgListener(Thread):
     self.session_queue.append(ss)
     c = str(len(self.session_queue))
     self.lock.release()
-    debugger.updateStatusLine()
+    dbgPavim.updateStatusLine()
     print c+" pending connection(s) to be debug, press <F5> to continue."
   def nextSession(self):
     session = None
@@ -890,7 +902,7 @@ class DbgListener(Thread):
     if len(self.session_queue) > 0:
       session = self.session_queue.pop(0)
     self.lock.release()
-    debugger.updateStatusLine()
+    dbgPavim.updateStatusLine()
     print ""
     return session
   def stop(self):
@@ -903,17 +915,18 @@ class DbgListener(Thread):
       s.sock.close()
     self._status = self.CLOSED
     self.lock.release()
-    debugger.updateStatusLine()
+    dbgPavim.updateStatusLine()
   def status(self):
     self.lock.acquire()
     s = self._status
     self.lock.release()
     return s
   def run(self):
-    global debugger
+    global dbgPavim
     self.lock.acquire()
     serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    serv.settimeout(None)
     try:
       serv.bind(('', self.port))
     except socket.error, e:
@@ -928,7 +941,7 @@ class DbgListener(Thread):
       (sock, address) = serv.accept()
       s = self.status()
       if s == self.LISTEN:
-        if debugger.break_at_entry:
+        if dbgPavim.break_at_entry:
           self.newSession(DbgSessionWithUI(sock))
         else:
           client = DbgSilentClient(DbgSession(sock))
@@ -975,17 +988,17 @@ class BreakPoint:
     """ return list of breakpoint number """
     return self.dictionaries.keys()
 
-class Debugger:
-  """ Main Debugger class """
+class DBGPavim:
+  """ Main DBGPavim class """
   def __init__(self):
-    """ initialize Debugger """
+    """ initialize DBGPavim """
     self.loadSettings()
     self.debugListener = DbgListener(self.port)
     self.debugSession  = DbgSession(None)
     vim.command('sign unplace *')
 
     self.normal_statusline = vim.eval('&statusline')
-    self.statusline="%<%f\ %h%m%r\ %=%-10.(%l,%c%V%)\ %P\ %=%{'PHP-'}%{(g:debuggerBreakAtEntry==1)?'bae':'bap'}"
+    self.statusline="%<%f\ %h%m%r\ %=%-10.(%l,%c%V%)\ %P\ %=%{'PHP-'}%{(g:dbgPavimBreakAtEntry==1)?'bae':'bap'}"
     self.breakpt    = BreakPoint()
     self.ui         = DebugUI(12, 70)
 
@@ -1004,21 +1017,37 @@ class Debugger:
     vim.command("let &statusline=\""+sl+"\"")
 
   def loadSettings(self):
-    self.port = int(vim.eval('debuggerPort'))
-    self.max_children = vim.eval('debuggerMaxChildren')
-    self.max_data = vim.eval('debuggerMaxData')
-    self.max_depth = vim.eval('debuggerMaxDepth')
-    self.break_at_entry = int(vim.eval('debuggerBreakAtEntry'))
+    self.port = int(vim.eval('dbgPavimPort'))
+    self.max_children = vim.eval('dbgPavimMaxChildren')
+    self.max_data = vim.eval('dbgPavimMaxData')
+    self.max_depth = vim.eval('dbgPavimMaxDepth')
+    self.break_at_entry = int(vim.eval('dbgPavimBreakAtEntry'))
+    self.path_map = vim.eval('dbgPavimPathMap')
+    for m in self.path_map:
+      m[0] = m[0].replace("\\","/")
+      m[1] = m[1].replace("\\","/")
+  def remotePathOf(self,lpath):
+    for m in self.path_map:
+      l = len(m[0])
+      if l and lpath[0:l] == m[0]:
+        return m[1]+lpath[l:]
+    return lpath
+  def localPathOf(self,rpath):
+    for m in self.path_map:
+      l = len(m[1])
+      if l and rpath[0:l] == m[1]:
+        return m[0]+rpath[l:]
+    return rpath
   def setMaxChildren(self):
-    self.max_children = vim.eval('debuggerMaxChildren')
+    self.max_children = vim.eval('dbgPavimMaxChildren')
     if self.debugSession.sock != None:
       self.debugSession.command('feature_set', '-n max_children -v ' + self.max_children)
   def setMaxDepth(self):
-    self.max_depth = vim.eval('debuggerMaxDepth')
+    self.max_depth = vim.eval('dbgPavimMaxDepth')
     if self.debugSession.sock != None:
       self.debugSession.command('feature_set', '-n max_depth -v ' + self.max_depth)
   def setMaxData(self):
-    self.max_data = vim.eval('debuggerMaxData')
+    self.max_data = vim.eval('dbgPavimMaxData')
     if self.debugSession.sock != None:
       self.debugSession.command('feature_set', '-n max_data -v ' + self.max_data)
   def handle_exception(self):
@@ -1143,8 +1172,11 @@ class Debugger:
       bno = self.breakpt.add(file, row, exp)
       vim.command('sign place ' + str(bno) + ' name=breakpt line=' + str(row) + ' file=' + file)
       if self.debugSession.sock != None:
+        fn = dbgPavim.remotePathOf(self.breakpt.getfile(bno))
+        if self.debugSession.isWinServer:
+          fn = fn.replace("/","\\")
         msgid = self.debugSession.send_command('breakpoint_set', \
-                                  '-t line -f ' + self.breakpt.getfile(bno) + ' -n ' + str(self.breakpt.getline(bno)), \
+                                  '-t line -f ' + fn + ' -n ' + str(self.breakpt.getline(bno)), \
                                   self.breakpt.getexp(bno))
         self.debugSession.bptsetlst[msgid] = bno
         self.debugSession.ack_command()
@@ -1154,9 +1186,9 @@ class Debugger:
     self.debugSession.close()
     self.debugListener.stop()
 
-def debugger_init():
-  global debugger
-  debugger = Debugger()
+def dbgPavim_init():
+  global dbgPavim
+  dbgPavim = DBGPavim()
 
 error_msg = { \
     # 000 Command parsing errors
