@@ -62,12 +62,12 @@
 "
 "                 let g:dbgPavimMaxDepth = 10
 "
-"               g:dbgPavimBreakAtEntry (default 1): Whether to break at entry,
+"               g:dbgPavimBreakAtEntry (default 0): Whether to break at entry,
 "               if set it 0, the debugger engine will break only at
 "               breakpoints.
 "               For example:
 "
-"                 let g:dbgPavimBreakAtEntry = 0
+"                 let g:dbgPavimBreakAtEntry = 1
 "
 "               g:dbgPavimPathMap (default []): Map local path to remote path
 "               on server.
@@ -93,6 +93,24 @@ else
   call confirm('dbgpavim.vim: Unable to find '.s:dbgpavim_py.'. Place it in either your home vim directory or in the Vim runtime directory.', 'OK')
 endif
 
+if !exists('g:dbgPavimPort')
+  let g:dbgPavimPort = 9000
+endif
+if !exists('g:dbgPavimMaxChildren')
+  let g:dbgPavimMaxChildren = 1024
+endif
+if !exists('g:dbgPavimMaxData')
+  let g:dbgPavimMaxData = 1024
+endif
+if !exists('g:dbgPavimMaxDepth')
+  let g:dbgPavimMaxDepth = 1
+endif
+if !exists('g:dbgPavimBreakAtEntry')
+  let g:dbgPavimBreakAtEntry = 0
+endif
+if !exists('g:dbgPavimPathMap')
+  let g:dbgPavimPathMap = []
+endif
 map <silent> <F5> :python dbgPavim.run()<cr>
 map <silent> <F6> :python dbgPavim.quit()<cr>
 map <silent> <F8> :call Bae()<cr>
@@ -100,9 +118,11 @@ map <silent> + :call ResizeWindow("+")<cr>
 map <silent> - :call ResizeWindow("-")<cr>
 command! -nargs=? Bp python dbgPavim.mark('<args>')
 command! -nargs=0 Bl python dbgPavim.list()
-command! -nargs=1 Dmc let g:dbgPavimMaxChildren=<args>|python dbgPavim.setMaxChildren()
-command! -nargs=1 Dme let g:dbgPavimMaxDepth=<args>|python dbgPavim.setMaxDepth()
-command! -nargs=1 Dma let g:dbgPavimMaxData=<args>|python dbgPavim.setMaxData()
+command! -nargs=? Dp python dbgPavim.cli('<args>')
+command! -nargs=1 Children let g:dbgPavimMaxChildren=<args>|python dbgPavim.setMaxChildren()
+command! -nargs=1 Depth let g:dbgPavimMaxDepth=<args>|python dbgPavim.setMaxDepth()
+command! -nargs=1 Length let g:dbgPavimMaxData=<args>|python dbgPavim.setMaxData()
+
 function! CreateFunctionKeys()
   map <silent> <F1> :python dbgPavim.ui.help()<cr>
   map <silent> <F2> :python dbgPavim.command('step_into')<cr>
@@ -112,7 +132,8 @@ function! CreateFunctionKeys()
   map <silent> <F9> :python dbgPavim.ui.reLayout()<cr>
   map <silent> <F11> :python dbgPavim.watch_input("context_get")<cr>A<cr>
   map <silent> <F12> :python dbgPavim.watch_input("property_get", '<cword>')<cr>A<cr>
-  
+  map U u2<C-o>z.
+
   command! -nargs=0 Up python dbgPavim.up()
   command! -nargs=0 Dn python dbgPavim.down()
   command! -nargs=? Pg python dbgPavim.property("<args>")
@@ -128,13 +149,14 @@ function! ClearFunctionKeys()
     unmap <F9>
     unmap <F11>
     unmap <F12>
-  
+    unmap U
+
     delcommand Up
     delcommand Dn
     delcommand Pg
-	catch /.*/
-	  echo "Exception from" v:throwpoint
-	endtry
+  catch /.*/
+    echo "Exception from" v:throwpoint
+  endtry
 endfunction
 function! ResizeWindow(flag)
   let l:width = winwidth("%")
@@ -150,13 +172,15 @@ function! Bae()
 endfunction
 function! WatchWindowOnEnter()
   let l:line = getline(".")
-  if l:line =~ "^\\s*\\$.* = (object)\\|(array)"
+  if l:line =~ "^\\s*\\$.* = (object) $\\|(array) $"
     execute "Pg ".substitute(line,"\\s*\\(\\S.*\\S\\)\\s*=.*","\\1","g")
     execute "normal \<c-w>p"
   elseif l:line =~ "^\\d\\+  .*:\\d\\+$"
     let fn = substitute(l:line,"^\\d\\+  \\(.*\\):\\d\\+$","\\1","")
     let ln = substitute(l:line,"^\\d\\+  .*:\\(\\d\\+\\)$","\\1","")
     execute 'python dbgPavim.debugSession.jump("'.l:fn.'",'.l:ln.')'
+  elseif foldlevel(".") > 0
+    execute 'normal za'
   endif
 endfunction
 function! StackWindowOnEnter()
@@ -172,24 +196,6 @@ hi DbgBreakPt term=reverse ctermfg=White ctermbg=Green gui=reverse
 sign define current text=->  texthl=DbgCurrent linehl=DbgCurrent
 sign define breakpt text=B>  texthl=DbgBreakPt linehl=DbgBreakPt
 
-if !exists('g:dbgPavimPort')
-  let g:dbgPavimPort = 9000
-endif
-if !exists('g:dbgPavimMaxChildren')
-  let g:dbgPavimMaxChildren = 1024
-endif
-if !exists('g:dbgPavimMaxData')
-  let g:dbgPavimMaxData = 1024
-endif
-if !exists('g:dbgPavimMaxDepth')
-  let g:dbgPavimMaxDepth = 1
-endif
-if !exists('g:dbgPavimBreakAtEntry')
-  let g:dbgPavimBreakAtEntry = 1
-endif
-if !exists('g:dbgPavimPathMap')
-  let g:dbgPavimPathMap = []
-endif 
 python dbgPavim_init()
 set laststatus=2
 

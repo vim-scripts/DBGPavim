@@ -41,7 +41,7 @@ import traceback
 import xml.dom.minidom
 
 import string
-import time
+import time, subprocess
 from threading import Thread,Lock
 
 def getFilePath(s):
@@ -250,7 +250,7 @@ class TraceWindow(VimWindow):
         desc = ' : '+error_msg[int(node.getAttribute('code'))]
       return VimWindow.xml_on_element(self, node) + desc
   def on_create(self):
-    self.command('set nowrap fdm=marker fmr={{{,}}} fdl=0')
+    self.command('set wrap fdm=marker fmr={{{,}}} fdl=0')
 
 class WatchWindow(VimWindow):
   def __init__(self, name = 'WATCH_WINDOW'):
@@ -314,7 +314,7 @@ class WatchWindow(VimWindow):
     self.write('<?')
     self.command('inoremap <buffer> <cr> <esc>:python dbgPavim.debugSession.watch_execute()<cr>')
     self.command('set noai nocin')
-    self.command('set nowrap fdm=manual fmr={{{,}}} ft=php fdl=1')
+    self.command('set wrap fdm=manual fmr={{{,}}} ft=php fdl=1')
   def input(self, mode, arg = ''):
     self.prepare()
     line = self.buffer[-1]
@@ -360,23 +360,33 @@ class HelpWindow(VimWindow):
         '')
     self.command('1')
 
+class ConsoleWindow(VimWindow):
+  def __init__(self, name = 'CONSOLE__WINDOW'):
+    VimWindow.__init__(self, name)
+  def before_create(self):
+    pass
+  def on_create(self):
+    vim.command('setlocal autoread')
+
 class DebugUI:
   """ DEBUGUI class """
   (NORMAL, DEBUG) = (0,1)
   def __init__(self, stackwinHeight, watchwinWidth):
     """ initialize object """
-    self.watchwin = WatchWindow()
-    self.stackwin = StackWindow()
+    self.watchwin       = WatchWindow()
+    self.stackwin       = StackWindow()
     self.stackwinHeight = stackwinHeight
-    self.watchwinWidth = watchwinWidth
-    self.tracewin  = None
-    self.helpwin  = None
-    self.mode     = DebugUI.NORMAL
-    self.file     = None
-    self.line     = None
-    self.winbuf   = {}
-    self.cursign  = None
-    self.sessfile = os.getenv("HOME").replace("\\","/")+"/dbgpavim_saved_session." + str(os.getpid())
+    self.watchwinWidth  = watchwinWidth
+    self.tracewin       = None
+    self.helpwin        = None
+    self.mode           = DebugUI.NORMAL
+    self.file           = None
+    self.line           = None
+    self.winbuf         = {}
+    self.cursign        = None
+    self.sessfile       = os.getenv("HOME").replace("\\","/")+"/dbgpavim_saved_session." + str(os.getpid())
+    self.clilog         = os.getenv("HOME").replace("\\","/")+"/dbgpavim_cli." + str(os.getpid())
+    self.cliwin         = None
 
   def trace(self):
     if self.tracewin:
@@ -424,19 +434,21 @@ class DebugUI:
     # restore session
     vim.command('silent tabonly')
     vim.command('source ' + self.sessfile)
-    os.system('rm -f ' + self.sessfile)
+    os.remove(self.sessfile)
 
     self.set_highlight()
-
 
     self.winbuf.clear()
     self.file    = None
     self.line    = None
     self.mode    = DebugUI.NORMAL
     self.cursign = None
+    self.cliwin  = None
   def create(self):
     """ create windows """
     self.stackwin.create('botright '+str(self.stackwinHeight)+' new')
+    if self.cliwin:
+      self.cliwin.create('vertical new')
     self.watchwin.create('vertical belowright '+str(self.watchwinWidth)+' new')
   def reLayout(self):
     if self.stackwin.getHeight() != self.stackwinHeight or self.watchwin.getWidth() != self.watchwinWidth:
@@ -460,12 +472,19 @@ class DebugUI:
       self.stackwin.focus()
       self.helpwin.create('vertical new')
 
+  def update_cli(self):
+    self.cliwin.focus()
+    vim.command('e')
+    vim.command('normal G')
+
   def destroy(self):
     """ destroy windows """
     self.watchwin.destroy()
     self.stackwin.destroy()
     if self.tracewin:
       self.tracewin.destroy()
+    if self.cliwin:
+      self.cliwin.destroy()
   def go_srcview(self):
     vim.command('1wincmd w')
   def next_sign(self):
@@ -492,6 +511,8 @@ class DebugUI:
       vim.command('sign unplace ' + self.cursign)
       vim.command('sign jump ' + nextsign + ' file='+file)
       self.cursign = nextsign
+      if self.cliwin:
+        self.update_cli()
     else:
       vim.command(': ' + str(line))
 
@@ -896,6 +917,8 @@ class DbgListener(Thread):
     self.lock.release()
     dbgPavim.updateStatusLine()
     print c+" pending connection(s) to be debug, press <F5> to continue."
+    if dbgPavim.ui.cliwin:
+      dbgPavim.run()
   def nextSession(self):
     session = None
     self.lock.acquire()
@@ -987,6 +1010,17 @@ class BreakPoint:
   def list(self):
     """ return list of breakpoint number """
     return self.dictionaries.keys()
+
+class AsyncRunner(Thread):
+  def __init__(self, cmd, logfile):
+    self.cmd = cmd
+    self.logfile = logfile
+    Thread.__init__(self)
+  def run(self):
+    log = open(self.logfile, "w")
+    subprocess.check_call(self.cmd, stdin=None, stdout=log, stderr=log, shell=True)
+    log.close()
+    os.remove(self.logfile)
 
 class DBGPavim:
   """ Main DBGPavim class """
@@ -1150,6 +1184,13 @@ class DBGPavim:
           self.debugSession.start()
     except:
       self.handle_exception()
+
+  def cli(self, args):
+    self.ui.cliwin = ConsoleWindow(self.ui.clilog)
+    self.run()
+    cmd = 'php -dxdebug.remote_autostart=1 -dxdebug.remote_port='+str(self.port)+' '+vim.eval('expand("%")')+' '+args
+    ar = AsyncRunner(cmd, self.ui.clilog)
+    ar.start()
 
   def list(self):
     self.ui.watchwin.write('--> breakpoints list: ')
