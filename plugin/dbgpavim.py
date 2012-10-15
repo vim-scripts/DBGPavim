@@ -258,7 +258,6 @@ class WatchWindow(VimWindow):
   def fixup_single(self, line, node, level):
     return ''.ljust(level*1) + line + '\n'
   def fixup_childs(self, line, node, level):
-    global z
     if len(node.childNodes)      == 1              and \
        (node.firstChild.nodeType == node.TEXT_NODE  or \
        node.firstChild.nodeType  == node.CDATA_SECTION_NODE):
@@ -272,13 +271,12 @@ class WatchWindow(VimWindow):
         line += '(e:'+encoding+') ' + str(node.firstChild.data) + ';\n'
     else:
       if level == 0:
-        line = ''.ljust(level*1) + str(line) + ';' + '\n'
+        line = ''.ljust(level*1) + str(line) + '\n'
         line += self.xml_stringfy_childs(node, level+1)
-        line += '/*}}}1*/\n'
+        line += '\n'
       else:
-        line = (''.ljust(level*1) + str(line) + ';').ljust(self.width-20) + ''.ljust(level*1) + '/*{{{' + str(level+1) + '*/' + '\n'
+        line = (''.ljust(level*1) + str(line) + ';') + '\n'
         line += str(self.xml_stringfy_childs(node, level+1))
-        line += (''.ljust(level*1) + ''.ljust(level*1)).ljust(self.width-20) + ''.ljust(level*1) + '/*}}}' + str(level+1) + '*/\n'
     return line
   def xml_on_element(self, node):
     if node.nodeName == 'property':
@@ -296,7 +294,7 @@ class WatchWindow(VimWindow):
       else:
         return str('%-20s' % fullname) + ' = (' + self.type + ') '
     elif node.nodeName == 'response':
-      return "$command = '" + node.getAttribute('command') + "'"
+      return '// by ' + node.getAttribute('command')
     else:
       return VimWindow.xml_on_element(self, node)
 
@@ -318,23 +316,23 @@ class WatchWindow(VimWindow):
   def input(self, mode, arg = ''):
     self.prepare()
     line = self.buffer[-1]
-    if line[:len(mode)+1] == '/*{{{1*/ => '+mode+':':
+    if line[:len(mode)+1] == '// => '+mode+':':
       self.buffer[-1] = line + arg
     else:
-      self.buffer.append('/*{{{1*/ => '+mode+': '+arg)
+      self.buffer.append('// => '+mode+': '+arg)
     self.command('normal G')
   def get_command(self):
     line = self.buffer[-1]
-    if line[0:17] == '/*{{{1*/ => exec:':
+    if line[0:11] == '// => exec:':
       print "exec does not supported by xdebug now."
       return ('none', '')
-      #return ('exec', line[17:].strip(' '))
-    elif line[0:17] == '/*{{{1*/ => eval:':
-      return ('eval', line[17:].strip(' '))
-    elif line[0:25] == '/*{{{1*/ => property_get:':
-      return ('property_get', line[25:].strip(' '))
-    elif line[0:24] == '/*{{{1*/ => context_get:':
-      return ('context_get', line[24:].strip(' '))
+      #return ('exec', line[11:].strip(' '))
+    elif line[0:11] == '// => eval:':
+      return ('eval', line[11:].strip(' '))
+    elif line[0:19] == '// => property_get:':
+      return ('property_get', line[19:].strip(' '))
+    elif line[0:18] == '// => context_get:':
+      return ('context_get', line[18:].strip(' '))
     else:
       return ('none', '')
 
@@ -387,6 +385,7 @@ class DebugUI:
     self.sessfile       = os.getenv("HOME").replace("\\","/")+"/dbgpavim_saved_session." + str(os.getpid())
     self.clilog         = os.getenv("HOME").replace("\\","/")+"/dbgpavim_cli." + str(os.getpid())
     self.cliwin         = None
+    self.backup_ssop    = vim.eval('&ssop')
 
   def trace(self):
     if self.tracewin:
@@ -402,6 +401,7 @@ class DebugUI:
       return
     self.mode = DebugUI.DEBUG
     # save session
+    vim.command('set ssop-=tabpages')
     vim.command('mksession! ' + self.sessfile)
     for i in range(1, len(vim.windows)+1):
       vim.command(str(i)+'wincmd w')
@@ -432,8 +432,8 @@ class DebugUI:
     self.destroy()
 
     # restore session
-    vim.command('silent tabonly')
     vim.command('source ' + self.sessfile)
+    vim.command("let &ssop=\""+self.backup_ssop+"\"")
     os.remove(self.sessfile)
 
     self.set_highlight()
@@ -818,7 +818,7 @@ class DbgSessionWithUI(DbgSession):
     self.ui.watchwin.write_xml_childs(res)
   def handle_response_feature_set(self, res):
     """handle <response command=feature_set> tag """
-    self.ui.watchwin.write_xml_childs(res)
+    #self.ui.watchwin.write_xml_childs(res)
   def handle_response_default(self, res):
     """handle <response command=context_get> tag """
     print res.toprettyxml()
@@ -850,7 +850,7 @@ class DbgSessionWithUI(DbgSession):
   def property_get(self, name = ''):
     if name == '':
       name = vim.eval('expand("<cword>")')
-    self.ui.watchwin.write('--> property_get: '+name)
+    self.ui.watchwin.write('// property_get: '+name)
     self.command('property_get', '-d %d -n %s' % (self.curstack,  name))
 
   def watch_execute(self):
@@ -916,9 +916,7 @@ class DbgListener(Thread):
     c = str(len(self.session_queue))
     self.lock.release()
     dbgPavim.updateStatusLine()
-    print c+" pending connection(s) to be debug, press <F5> to continue."
-    if dbgPavim.ui.cliwin:
-      dbgPavim.run()
+    print c+" pending connection(s) to be debug, press "+dbgPavim.dbgPavimKeyRun+" to continue."
   def nextSession(self):
     session = None
     self.lock.acquire()
@@ -930,15 +928,19 @@ class DbgListener(Thread):
     return session
   def stop(self):
     self.lock.acquire()
-    if self._status == self.LISTEN:
-      client = socket.socket ( socket.AF_INET, socket.SOCK_STREAM )
-      client.connect ( ( '127.0.0.1', self.port ) )
-      client.close()
-    for s in self.session_queue:
-      s.sock.close()
-    self._status = self.CLOSED
-    self.lock.release()
-    dbgPavim.updateStatusLine()
+    try:
+      if self._status == self.LISTEN:
+        client = socket.socket ( socket.AF_INET, socket.SOCK_STREAM )
+        client.connect ( ( '127.0.0.1', self.port ) )
+        client.close()
+      for s in self.session_queue:
+        s.send_command('detach')
+        s.sock.close()
+      del self.session_queue[:]
+    finally:
+      self._status = self.CLOSED
+      self.lock.release()
+      dbgPavim.updateStatusLine()
   def status(self):
     self.lock.acquire()
     s = self._status
@@ -1035,6 +1037,7 @@ class DBGPavim:
     self.statusline="%<%f\ %h%m%r\ %=%-10.(%l,%c%V%)\ %P\ %=%{'PHP-'}%{(g:dbgPavimBreakAtEntry==1)?'bae':'bap'}"
     self.breakpt    = BreakPoint()
     self.ui         = DebugUI(12, 70)
+    self.watchList  = []
 
   def updateStatusLine(self):
     status = self.debugListener.status()
@@ -1052,10 +1055,12 @@ class DBGPavim:
 
   def loadSettings(self):
     self.port = int(vim.eval('dbgPavimPort'))
+    self.dbgPavimKeyRun = vim.eval('dbgPavimKeyRun')
     self.max_children = vim.eval('dbgPavimMaxChildren')
     self.max_data = vim.eval('dbgPavimMaxData')
     self.max_depth = vim.eval('dbgPavimMaxDepth')
     self.break_at_entry = int(vim.eval('dbgPavimBreakAtEntry'))
+    self.show_context = int(vim.eval('dbgPavimShowContext'))
     self.path_map = vim.eval('dbgPavimPathMap')
     for m in self.path_map:
       m[0] = m[0].replace("\\","/")
@@ -1118,6 +1123,12 @@ class DBGPavim:
         self.debugSession.command(msg, arg1, arg2)
         if self.debugSession.status != 'stopping':
           self.debugSession.command('stack_get')
+          for var in self.watchList:
+            self.debugSession.command('property_get', "-d %d -n %s" % (self.debugSession.curstack, var))
+          if self.show_context:
+            self.debugSession.command('context_get', ('-d %d' % self.debugSession.curstack))
+        else:
+          self.debugSession.command('stop')
     except:
       self.handle_exception()
   def watch_input(self, cmd, arg = ''):
@@ -1132,6 +1143,19 @@ class DBGPavim:
         self.debugSession.watch_input(cmd, arg)
     except:
       self.handle_exception()
+  def watch(self, name = ''):
+    if name == '':
+      self.show_context = not self.show_context
+    else:
+      if name in self.watchList:
+        self.watchList.remove(name)
+      else:
+        self.watchList.append(name)
+  def listWatch(self):
+    if self.show_context:
+      print '*CONTEXT*'
+    for var in self.watchList:
+      print var;
   def property(self, name = ''):
     try:
       if self.debugSession.sock == None:
@@ -1186,14 +1210,31 @@ class DBGPavim:
       self.handle_exception()
 
   def cli(self, args):
+    vim.command("let g:dbgPavimBreakAtEntry=1")
     self.ui.cliwin = ConsoleWindow(self.ui.clilog)
     self.run()
-    cmd = 'php -dxdebug.remote_autostart=1 -dxdebug.remote_port='+str(self.port)+' '+vim.eval('expand("%")')+' '+args
-    ar = AsyncRunner(cmd, self.ui.clilog)
-    ar.start()
+    filetype = vim.eval('&filetype')
+    filename = vim.eval('expand("%")')
+    if filename:
+      cmd = ' '+filename+' '+args
+      if filetype == 'php':
+        if vim.eval('CheckXdebug()') == '0':
+          cmd = 'php -dxdebug.remote_autostart=1 -dxdebug.remote_port='+str(self.port)+cmd
+      elif filetype == 'python':
+        if vim.eval('CheckPydbgp()') == '0':
+          cmd = 'pydbgp -u -d '+str(self.port)+cmd
+      if cmd[0] != ' ':
+        ar = AsyncRunner(cmd, self.ui.clilog)
+        ar.start()
+        time.sleep(0.4)
+        vim.eval('feedkeys("\\'+self.dbgPavimKeyRun+'")')
+      else:
+        print "Only python and php file debugging are integrated for now."
+    else:
+      print "You need open one python or php file first."
 
   def list(self):
-    self.ui.watchwin.write('--> breakpoints list: ')
+    self.ui.watchwin.write('// breakpoints list: ')
     for bno in self.breakpt.list():
       self.ui.watchwin.write(str(bno)+'  ' + self.breakpt.getfile(bno) + ':' + str(self.breakpt.getline(bno)))
 
@@ -1223,6 +1264,8 @@ class DBGPavim:
         self.debugSession.ack_command()
 
   def quit(self):
+    if self.debugSession.sock:
+      self.debugSession.send_command('detach')
     self.ui.normal_mode()
     self.debugSession.close()
     self.debugListener.stop()
