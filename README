@@ -1,8 +1,9 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=4059
 
-
 This is a plugin to enable php debug in VIM with Xdebug, which originates from http://www.vim.org/scripts/script.php?script_id=1152.
 But most of the code, especially the debugger backend has been rewritten.
+
+Screencast -- http://youtu.be/GY3EcGQvw00
 
 Tested with --
 * XDebug 2.2 - PHP 5.4 - GVIM 7.3 - Python 2.7 @ Windows 7
@@ -137,4 +138,3 @@ Some change for Apache configuration is also necessary --
     php -dxdebug.remote_autostart=1 -dxdebug.remote_port=9009 test.php
 
 If you are tied of adding XDEBUG_SESSION_START=1 in query string, there is a XDEBUG_SESSION helper at http://userscripts.org/scripts/review/132695, a user script for Google Chrome. It also works for Firefox with help of GreaseMonkey.
-
