@@ -180,6 +180,7 @@ for key in keys(s:keyMappings)
   exec 'nnoremap <expr> <silent> '.key.' (exists("g:dbgPavimTab")==1 && g:dbgPavimTab == tabpagenr() ? "'.s:keyMappings[key].'" : "'.key.'")'
 endfor
 exec 'vnoremap '.g:dbgPavimKeyPropertyGet.' "vy:python dbgPavim.property("%v%")<CR>'
+exec 'vnoremap '.g:dbgPavimKeyEval.' "vy:python dbgPavim.watch_input("eval", "%v%")<CR>$a<CR>'
 command! -nargs=0 Up python dbgPavim.up()
 command! -nargs=0 Dn python dbgPavim.down()
 command! -nargs=? Pg python dbgPavim.property("<args>")
@@ -199,7 +200,9 @@ endfunction
 function! WatchWindowOnEnter()
   let l:line = getline(".")
   if l:line =~ "^\\s*.* = (.*)+;$"
-    execute "Pg ".substitute(line,"\\s*\\(\\S.*\\S\\)\\s*=.*","\\1","g")
+    let l:var = substitute(line,"\\s*\\(\\S.*\\S\\)\\s*=.*","\\1","g")
+    let l:var = substitute(l:var,"'","\\\\'","g")
+    execute "python dbgPavim.debugSession.expandVar('".l:var."')"
     execute "normal \<c-w>p"
   elseif l:line =~ "^\\d\\+  .*:\\d\\+$"
     let fn = substitute(l:line,"^\\d\\+  \\(.*\\):\\d\\+$","\\1","")
@@ -242,6 +245,24 @@ function! CheckXdebug()
     let l:ret = 1
   endif
   return l:ret
+endfunction
+function! Signs()
+  let l:signs = ''
+  redir => l:signs
+  silent exec 'sign place buffer='.bufnr('%')
+  redir END
+  let l:bpts = {}
+  let l:lines = split(l:signs, '\n')
+  for l:line in l:lines
+    if l:line =~ "^Signs for \\S*:$"
+      let l:file = expand("%:p")
+    elseif l:line =~ "^\\s*line=\\d*\\s*id=\\d*\\s*name=breakpt$"
+      let l:lno = substitute(l:line,"^\\s*line=\\(\\d\\+\\)\\s*id=\\d*\\s*name=breakpt$", "\\1", "g")
+      let l:id = substitute(l:line,"^\\s*line=\\d\\+\\s*id=\\(\\d\\+\\)\\s*name=breakpt$", "\\1", "g")
+      let l:bpts[l:id] = [l:file, l:lno]
+    endif
+  endfor
+  return l:bpts
 endfunction
 
 hi DbgCurrent term=reverse ctermfg=White ctermbg=Red gui=reverse
