@@ -1,22 +1,46 @@
-This is a plugin to enable php debuging in VIM with Xdebug, which originates from http://www.vim.org/scripts/script.php?script_id=1152.
+This is a VIM plugin to enable php debuging with Xdebug, to enable python debugging with Komodo-PythonRemoteDebugging-Client, which originates from http://www.vim.org/scripts/script.php?script_id=1152.
 But most of the code, especially the debugger backend has been rewritten.
 
-Tested with:
+Generally speaking, this is a plugin to make VIM working as a DBGP server, so that VIM can talk with DBGP clients like Xdebug and Komodo.
+
+PHP debugging Tested with:
 
 * XDebug 2.2 - PHP 5.4 - GVIM 7.3 - Python 2.7 @ Windows 7
 * XDebug 2.0 - PHP 5.2 - VIM 7.3  - Python 2.7 @ Linux
-* XDebug 2.0 - PHP 5.2 - VIM 7.3  - Python 2.3 @ Linux
 * XDebug 2.2 - PHP 5.2 - VIM 7.3  - Python 2.7 @ Linux
+* XDebug 2.0 - PHP 5.2 - VIM 7.3  - Python 2.3 @ Linux (Only early version of this plugin works with python2.3)
+* XDebug 2.1 - PHP 5.3 - MacVIM 7.3  - Python 2.7 @ OS X 10.8
 
-Some screenshots (under Windows 7) are here: http://sharing-from-brook.16002.n6.nabble.com/Debug-php-in-VIM-with-Xdebug-and-DBGPavim-td4930670.html.
+Python debugging Tested with:
+
+* Komodo Python Remote Debugging Client - Python 2.7 - MacVIM 7.3 @ Mac OS X 10.8
+* Komodo Python Remote Debugging Client - Python 2.7 - GVIM 7.3 @ Windows 7
+* Komodo Python Remote Debugging Client - Python 2.7 - VIM 7.3 @ Linux
+
+Screen shot
+----------
+Debugging PHP
+![DBGPavim-php](http://sharing-from-brook.16002.n6.nabble.com/file/n4930670/debug_mode1.png)
+Debugging Python
+![DBGPavim-python](http://sharing-from-brook.16002.n6.nabble.com/file/n4930670/py.png)
+
+More at http://sharing-from-brook.16002.n6.nabble.com/Debug-php-in-VIM-with-Xdebug-and-DBGPavim-td4930670.html.
+
 
 ## Enhancements
 
 ### Non blocking debugger backend.
-So that VIM users do not need to wait for connection from server. No timeouts; users press F5 to start debugger backend and use VIM normally. Debug backend won't stop users from interacting with VIM. Users can press F6 to stop debugger backend at any time.
+So that VIM users do not need to wait for connection from server. No timeouts; users press `F5` to start debugger backend and use VIM normally. Debug backend won't stop users from interacting with VIM. Users can press `F6` to stop debugger backend at any time.
 
 ### Catch all connections from apache server.
 This is very important for a large website, especially for pages that contain AJAX requests. In that case, one reload of a page may trigger dozens of HTTP requests, each of them going to a different URL. The new debugger backend will catch all connections from the server.
+
+If you would not like catch all connections from HTTP server, then add below line to your vimrc:
+
+    let g:dbgPavimOnce = 1
+
+This setting makes your site accessible when you're in debugging. By default, your site is blocked when you're in debugging, because all connections are caught by debugger backend.
+
 
 ### Break only at breakpoints
 
@@ -50,7 +74,7 @@ In debugging mode
     <F4>      => step out
     <F5>      => start debugging / run
     <F6>      => stop debugging
-    <F7>      => evalute expression and display result. cursor is automatically move to watch window. type line and just press enter.
+    <F7>      => evalute expression and display result. cursor is automatically move to watch window. type line and just press `Enter`.
     <F9>      => toggle layout
     <F11>     => shows all variables
     <F12>     => shows variable on current cursor
@@ -73,26 +97,24 @@ You can define your own key mappings as below:
 
 In Watch window
 
-    If you press Enter key at a line which ends with --
+    If you press `Enter` at a line which ends with plus to expand it.
 
-    (object)  => to get value of an object.
-    (array)   => to get value of an array.
-
-    If you press Enter key at a line of output from command :Bl, that breakpoint will be located.
+    If you press `Enter` at a line of output from command `:Bl`, that breakpoint will be located.
 
 In Stack window
 
-    If you press Enter key at a line, stack level will be set.
+    If you press `Enter` at a line, stack level will be set.
 
 ### Windows Support
 
 ### Status line for debugger backend
 
-After user press <F5> to start debugger backend, a string like "PHP-bae-LISN" will show up at the right side of status line.
+After user press `F5` to start debugger backend, a string like "bap-LISN-9000" will show up at the right side of status line.
+Here `9000` is the listening port of debugger, which is set by g:dbgPavimPort.
 
 The status string looks like:
 
-    PHP-<bae|bap>-<LISN|PENDn|CONN|CLSD>
+    <bae|bap>-<LISN|PENDn|CONN|CLSD>
 
     bae       => means Break At Entry
     bap       => means Break only At breakPoints
@@ -126,8 +148,10 @@ If your VIM doesn't support python, download VIM source package from http://www.
 
 * Install xdebug for php, and edit php.ini
 
+    <pre>
     zend_extension=path_to_xdebug.so
     xdebug.remote_enable=1
+    </pre>
 
 * Edit your ~/.vimrc
 
@@ -146,7 +170,7 @@ In your VirtualHost section, set debugger port same as the one in your vimrc:
 
 * Open your php file, use :Bp to set breakpoints
 
-* Now, press F5 to start debugger backend
+* Now, press `F5` to start debugger backend
 
 * Back to your browser, add XDEBUG_SESSION_START=1 to your URL, for example, http://localhost/index.php?XDEBUG_SESSION_START=1.
 

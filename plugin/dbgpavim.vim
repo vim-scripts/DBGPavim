@@ -5,7 +5,7 @@
 "=============================================================================
 "    Copyright: Copyright (C) 2012 Brook Hong
 "      License:	The MIT License
-"				
+"
 "				Permission is hereby granted, free of charge, to any person obtaining
 "				a copy of this software and associated documentation files
 "				(the "Software"), to deal in the Software without restriction,
@@ -13,10 +13,10 @@
 "				merge, publish, distribute, sublicense, and/or sell copies of the
 "				Software, and to permit persons to whom the Software is furnished
 "				to do so, subject to the following conditions:
-"				
+"
 "				The above copyright notice and this permission notice shall be included
 "				in all copies or substantial portions of the Software.
-"				
+"
 "				THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 "				OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 "				MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
@@ -30,7 +30,7 @@
 "
 "               This file should reside in the plugins directory along
 "               with dbgpavim.py and be automatically sourced.
-"               
+"
 "               By default, the script expects the debugging engine to connect
 "               on port 9000. You can change this with the g:dbgPavimPort
 "               variable by putting the following line your vimrc:
@@ -88,7 +88,7 @@ endif
 " Load dbgpavim.py either from the same path where dbgpavim.vim is
 let s:dbgpavim_py = expand("<sfile>:p:h")."/dbgpavim.py"
 if filereadable(s:dbgpavim_py)
-  exec 'pyfile '.s:dbgpavim_py 
+  exec 'pyfile '.s:dbgpavim_py
 else
   call confirm('dbgpavim.vim: Unable to find '.s:dbgpavim_py.'. Place it in either your home vim directory or in the Vim runtime directory.', 'OK')
 endif
@@ -107,6 +107,9 @@ if !exists('g:dbgPavimMaxDepth')
 endif
 if !exists('g:dbgPavimBreakAtEntry')
   let g:dbgPavimBreakAtEntry = 0
+endif
+if !exists('g:dbgPavimOnce')
+  let g:dbgPavimOnce = 0
 endif
 if !exists('g:dbgPavimPathMap')
   let g:dbgPavimPathMap = []
@@ -150,12 +153,18 @@ endif
 if !exists('g:dbgPavimKeyPropertyGet')
   let g:dbgPavimKeyPropertyGet = '<F12>'
 endif
+if !exists('g:dbgPavimKeyLargeWindow')
+  let g:dbgPavimKeyLargeWindow = '<leader>+'
+endif
+if !exists('g:dbgPavimKeySmallWindow')
+  let g:dbgPavimKeySmallWindow = '<leader>-'
+endif
 exec 'map <silent> '.g:dbgPavimKeyRun.' :python dbgPavim.run()<cr>'
 exec 'map <silent> '.g:dbgPavimKeyQuit.' :python dbgPavim.quit()<cr>'
 exec 'map <silent> '.g:dbgPavimKeyToggleBae.' :call Bae()<cr>'
 exec 'map <silent> '.g:dbgPavimKeyToggleBp.' :python dbgPavim.mark()<cr>'
-map <silent> + :call ResizeWindow("+")<cr>
-map <silent> - :call ResizeWindow("-")<cr>
+exec 'map <silent> '.g:dbgPavimKeyLargeWindow.' :call ResizeWindow("+")<cr>'
+exec 'map <silent> '.g:dbgPavimKeySmallWindow.' :call ResizeWindow("-")<cr>'
 command! -nargs=? Bp python dbgPavim.mark('<args>')
 command! -nargs=0 Bl python dbgPavim.list()
 command! -nargs=? Dp python dbgPavim.cli('<args>')
@@ -195,7 +204,7 @@ function! ResizeWindow(flag)
 endfunction
 function! Bae()
   let g:dbgPavimBreakAtEntry = (g:dbgPavimBreakAtEntry == 1) ? 0 : 1
-  execute 'python dbgPavim.break_at_entry = '.g:dbgPavimBreakAtEntry
+  execute 'python dbgPavim.breakAtEntry = '.g:dbgPavimBreakAtEntry
 endfunction
 function! WatchWindowOnEnter()
   let l:line = getline(".")
@@ -214,7 +223,7 @@ function! WatchWindowOnEnter()
 endfunction
 function! StackWindowOnEnter()
   let l:stackNo = substitute(getline("."),"\\(\\d\\+\\)\\s\\+.*","\\1","g")
-  if l:stackNo =~ "^\\d\\+$" 
+  if l:stackNo =~ "^\\d\\+$"
     execute 'python dbgPavim.debugSession.go('.l:stackNo.')'
     execute "normal \<c-w>p"
   endif
@@ -254,24 +263,28 @@ function! Signs()
   let l:bpts = {}
   let l:lines = split(l:signs, '\n')
   for l:line in l:lines
-    if l:line =~ "^Signs for \\S*:$"
+    if l:line =~ "\\S*:$"
       let l:file = expand("%:p")
-    elseif l:line =~ "^\\s*line=\\d*\\s*id=\\d*\\s*name=breakpt$"
-      let l:lno = substitute(l:line,"^\\s*line=\\(\\d\\+\\)\\s*id=\\d*\\s*name=breakpt$", "\\1", "g")
-      let l:id = substitute(l:line,"^\\s*line=\\d\\+\\s*id=\\(\\d\\+\\)\\s*name=breakpt$", "\\1", "g")
+    elseif l:line =~ "^\\s*\\S*=\\d*\\s*\\S*=\\d*\\s*\\S*=breakpt$"
+      let l:lno = substitute(l:line,"^\\s*\\S*=\\(\\d\\+\\)\\s*\\S*=\\d*\\s*\\S*=breakpt$", "\\1", "g")
+      let l:id = substitute(l:line,"^\\s*\\S*=\\d\\+\\s*\\S*=\\(\\d\\+\\)\\s*\\S*=breakpt$", "\\1", "g")
       let l:bpts[l:id] = [l:file, l:lno]
     endif
   endfor
   return l:bpts
 endfunction
 
-hi DbgCurrent term=reverse ctermfg=White ctermbg=Red gui=reverse
-hi DbgBreakPt term=reverse ctermfg=White ctermbg=Green gui=reverse
+if !hlexists('DbgCurrent')
+  hi DbgCurrent term=reverse ctermfg=White ctermbg=Red gui=reverse
+endif
+if !hlexists('DbgBreakPt')
+  hi DbgBreakPt term=reverse ctermfg=White ctermbg=Green gui=reverse
+endif
 sign define current text=->  texthl=DbgCurrent linehl=DbgCurrent
 sign define breakpt text=B>  texthl=DbgBreakPt linehl=DbgBreakPt
 
-python dbgPavim_init()
 set laststatus=2
+python dbgPavim_init()
 
 autocmd BufEnter WATCH_WINDOW map <silent> <buffer> <Enter> :call WatchWindowOnEnter()<CR>
 autocmd BufEnter STACK_WINDOW map <silent> <buffer> <Enter> :call StackWindowOnEnter()<CR>
